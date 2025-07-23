@@ -19,7 +19,10 @@
     <!-- M3U URL Form -->
     <div id="m3uForm" class="mb-4">
       <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="border p-2 w-full mb-2">
-      <button onclick="fetchM3U()" class="bg-green-600 text-white px-4 py-2 rounded">Load Playlist</button>
+      <div class="flex gap-2">
+        <button onclick="fetchM3U()" class="bg-green-600 text-white px-4 py-2 rounded">Fetch Playlist</button>
+        <button onclick="loadSavedPlaylist()" class="bg-blue-500 text-white px-4 py-2 rounded">Load Saved Playlist</button>
+      </div>
     </div>
 
     <!-- Xtream Form -->
@@ -39,11 +42,6 @@
           <option value="location">Location</option>
           <option value="channel">Channel</option>
           <option value="quality">Quality</option>
-        </select>
-        <select id="typeFilter" class="p-2 border rounded" onchange="applyFilters()">
-          <option value="all">All</option>
-          <option value="live">Live</option>
-          <option value="vod">VOD</option>
         </select>
       </div>
     </div>
@@ -91,9 +89,11 @@
         if (!text.includes('#EXTINF')) throw new Error('Invalid playlist format');
 
         allChannels = parseM3U(text);
+        savePlaylistToLocal(url, text);
         filters.classList.remove('hidden');
         showStep('Parsing and displaying...');
         applyFilters();
+
         showStep('✅ Playlist loaded successfully');
       } catch (e) {
         console.error('Fetch failed:', e);
@@ -108,6 +108,7 @@
           if (!text.includes('#EXTINF')) throw new Error('Invalid playlist format via proxy');
 
           allChannels = parseM3U(text);
+          savePlaylistToLocal(url, text);
           filters.classList.remove('hidden');
           showStep('✅ Playlist loaded using proxy');
           applyFilters();
@@ -116,6 +117,24 @@
           showStep('❌ Failed to load playlist even via proxy.', true);
         }
       }
+    }
+
+    function savePlaylistToLocal(url, content) {
+      localStorage.setItem('savedPlaylistUrl', url);
+      localStorage.setItem('savedPlaylistData', content);
+    }
+
+    function loadSavedPlaylist() {
+      const data = localStorage.getItem('savedPlaylistData');
+      if (!data) {
+        alert('No saved playlist found. Please fetch one first.');
+        return;
+      }
+      showStep('Loading saved playlist...');
+      allChannels = parseM3U(data);
+      filters.classList.remove('hidden');
+      applyFilters();
+      showStep('✅ Loaded saved playlist');
     }
 
     function parseM3U(text) {
@@ -144,11 +163,9 @@
     function applyFilters() {
       const query = document.getElementById('search').value.toLowerCase();
       const groupBy = groupBySelect.value;
-      const type = document.getElementById('typeFilter').value;
 
       let filtered = allChannels.filter(c =>
-        c.name.toLowerCase().includes(query) &&
-        (type === 'all' || c.type === type)
+        c.name.toLowerCase().includes(query)
       );
 
       const groups = {};
