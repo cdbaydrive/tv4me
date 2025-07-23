@@ -5,6 +5,7 @@
   <title>IPTV Playlist Viewer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/clusterize.js@0.18.1/clusterize.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
   <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-md p-6">
@@ -20,6 +21,7 @@
     <div id="m3uForm" class="mb-4">
       <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="border p-2 w-full mb-2">
       <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="fetchM3U()">Fetch Playlist</button>
+      <button class="bg-yellow-500 text-white px-4 py-2 rounded ml-2" onclick="loadFromStorage()">Load Cached</button>
     </div>
 
     <!-- Xtream Form -->
@@ -30,22 +32,34 @@
       <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="loadXtream()">Login</button>
     </div>
 
+    <!-- Status Bar -->
+    <div id="statusBar" class="text-center text-sm text-gray-600 mb-2"></div>
+
     <!-- Filters -->
     <div id="filters" class="hidden mb-4">
-      <input type="text" id="search" placeholder="Search title..." class="p-2 border rounded w-full mb-2" oninput="applyFilters()">
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
-        <select id="languageFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
-        <select id="channelFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
-        <select id="qualityFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
-        <select id="yearFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+      <div class="grid grid-cols-1 sm:grid-cols-5 gap-2">
+        <select id="languageFilter" class="p-2 border rounded" onchange="applyFilters()">
+          <option value="all">Language</option>
+        </select>
+        <select id="channelFilter" class="p-2 border rounded" onchange="applyFilters()">
+          <option value="all">Channel</option>
+        </select>
+        <select id="qualityFilter" class="p-2 border rounded" onchange="applyFilters()">
+          <option value="all">Quality</option>
+        </select>
+        <select id="yearFilter" class="p-2 border rounded" onchange="applyFilters()">
+          <option value="all">Year</option>
+        </select>
+        <input type="text" id="search" placeholder="Search title..." class="p-2 border rounded" oninput="debouncedFilter()">
       </div>
     </div>
 
-    <!-- Loader -->
-    <div id="loader" class="text-center text-blue-500 font-semibold hidden mb-4">Fetching playlist...</div>
-
-    <!-- Display Area -->
-    <div id="playlistDisplay" class="space-y-4"></div>
+    <!-- Playlist Display with Clusterize.js -->
+    <div id="playlistWrapper" class="border rounded h-[500px] overflow-auto">
+      <table class="table-auto w-full text-sm">
+        <tbody id="playlistContent" class="clusterize-content"></tbody>
+      </table>
+    </div>
 
     <!-- Player -->
     <div id="playerContainer" class="hidden fixed bottom-4 right-4 w-80 bg-black rounded shadow-lg">
@@ -54,31 +68,62 @@
   </div>
 
   <script>
-    let allChannels = [];
-    let favorites = new Set(JSON.parse(localStorage.getItem('favorites') || '[]'));
-    let savedUrl = localStorage.getItem('lastUrl') || '';
-    document.getElementById('m3uUrl').value = savedUrl;
+    let allChannels = [], filteredChannels = [], favorites = new Set();
+    let clusterize = new Clusterize({
+      rows: [],
+      scrollId: 'playlistWrapper',
+      contentId: 'playlistContent'
+    });
 
-    const loader = document.getElementById('loader');
-    const filters = document.getElementById('filters');
-    const display = document.getElementById('playlistDisplay');
+    const statusBar = document.getElementById('statusBar');
+    const filtersDiv = document.getElementById('filters');
+    const m3uUrlInput = document.getElementById('m3uUrl');
+
+    function setStatus(msg, isError = false) {
+      statusBar.textContent = msg;
+      statusBar.className = text-center text-sm ${isError ? 'text-red-600' : 'text-gray-600'} mb-2;
+    }
+
+    function savePlaylist(url, data) {
+      localStorage.setItem('playlistURL', url);
+      localStorage.setItem('playlistData', JSON.stringify(data));
+    }
+
+    function loadFromStorage() {
+      const data = localStorage.getItem('playlistData');
+      const url = localStorage.getItem('playlistURL');
+      if (data) {
+        m3uUrlInput.value = url;
+        allChannels = JSON.parse(data);
+        populateFilters();
+        applyFilters();
+        setStatus('Loaded from cache');
+      } else {
+        setStatus('No cached data found', true);
+      }
+    }
 
     async function fetchM3U() {
-      const url = document.getElementById('m3uUrl').value;
+      const url = m3uUrlInput.value;
       if (!url) return alert('Enter M3U URL');
-      localStorage.setItem('lastUrl', url);
-      loader.classList.remove('hidden');
+
+      setStatus('Connecting to server...');
       try {
         const res = await fetch(url);
+        if (!res.ok) throw new Error('Connection failed');
+
+        setStatus('Fetching playlist...');
         const text = await res.text();
+        setStatus('Parsing playlist...');
+
         allChannels = parseM3U(text);
+        savePlaylist(url, allChannels);
         populateFilters();
-        filters.classList.remove('hidden');
         applyFilters();
+        setStatus(Loaded ${allChannels.length} channels);
+        filtersDiv.classList.remove('hidden');
       } catch (e) {
-        alert('Failed to fetch M3U');
-      } finally {
-        loader.classList.add('hidden');
+        setStatus(Error: ${e.message}, true);
       }
     }
 
@@ -91,18 +136,17 @@
         if (line.startsWith('#EXTINF')) {
           const nameMatch = line.match(/,(.*)/);
           const groupMatch = line.match(/group-title="(.*?)"/i);
-          const tvgIdMatch = line.match(/tvg-id="(.*?)"/i);
-          const yearMatch = line.match(/\b(19|20)\d{2}\b/);
+          const yearMatch = line.match(/year=(\d{4})/i);
           current = {
             name: nameMatch ? nameMatch[1] : 'Unknown',
             group: groupMatch ? groupMatch[1] : 'Other',
-            year: yearMatch ? yearMatch[0] : '',
-            language: /\bFR\b/i.test(line) ? 'FR' : (/\bEN\b/i.test(line) ? 'EN' : 'Other'),
-            quality: /UHD|4K/i.test(line) ? 'UHD' : (/FHD|1080p/i.test(line) ? 'FHD' : (/HD|720p/i.test(line) ? 'HD' : (/SD|480p/i.test(line) ? 'SD' : 'Unknown'))),
-            channel: nameMatch ? nameMatch[1].replace(/HD|FHD|UHD|4K|SD|\d{3,4}p/gi, '').trim() : 'Unknown'
+            language: /\bFR\b/i.test(line) ? 'FR' : /\bEN\b/i.test(line) ? 'EN' : 'Other',
+            quality: /UHD|4K/i.test(line) ? 'UHD' : /FHD|1080p/i.test(line) ? 'FHD' : /HD|720p/i.test(line) ? 'HD' : /SD|480p/i.test(line) ? 'SD' : 'Unknown',
+            year: yearMatch ? yearMatch[1] : 'Unknown'
           };
         } else if (line && !line.startsWith('#')) {
           current.url = line;
+          current.favorite = false;
           channels.push({ ...current });
         }
       }
@@ -110,86 +154,61 @@
     }
 
     function populateFilters() {
-      const languages = new Set();
-      const channels = new Set();
-      const qualities = new Set();
-      const years = new Set();
-      allChannels.forEach(c => {
-        languages.add(c.language);
-        channels.add(c.channel);
-        qualities.add(c.quality);
-        if (c.year) years.add(c.year);
+      const langSet = new Set(), chanSet = new Set(), qualSet = new Set(), yearSet = new Set();
+      allChannels.forEach(ch => {
+        langSet.add(ch.language);
+        chanSet.add(ch.group);
+        qualSet.add(ch.quality);
+        yearSet.add(ch.year);
       });
-      updateSelect('languageFilter', [...languages]);
-      updateSelect('channelFilter', [...channels]);
-      updateSelect('qualityFilter', [...qualities]);
-      updateSelect('yearFilter', [...years].sort());
+
+      populateDropdown('languageFilter', langSet);
+      populateDropdown('channelFilter', chanSet);
+      populateDropdown('qualityFilter', qualSet);
+      populateDropdown('yearFilter', yearSet);
     }
 
-    function updateSelect(id, values) {
-      const select = document.getElementById(id);
-      select.innerHTML = <option value="">All</option> + values.map(v => <option>${v}</option>).join('');
+    function populateDropdown(id, values) {
+      const el = document.getElementById(id);
+      el.innerHTML = '<option value="all">' + el.options[0].textContent + '</option>';
+      Array.from(values).sort().forEach(val => {
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = val;
+        el.appendChild(opt);
+      });
     }
 
     function applyFilters() {
-      const search = document.getElementById('search').value.toLowerCase();
       const lang = document.getElementById('languageFilter').value;
       const chan = document.getElementById('channelFilter').value;
       const qual = document.getElementById('qualityFilter').value;
       const year = document.getElementById('yearFilter').value;
+      const query = document.getElementById('search').value.toLowerCase();
 
-      const filtered = allChannels.filter(c => {
-        return (!lang || c.language === lang) &&
-               (!chan || c.channel === chan) &&
-               (!qual || c.quality === qual) &&
-               (!year || c.year === year) &&
-               c.name.toLowerCase().includes(search);
-      });
+      filteredChannels = allChannels.filter(ch =>
+        (lang === 'all' || ch.language === lang) &&
+        (chan === 'all' || ch.group === chan) &&
+        (qual === 'all' || ch.quality === qual) &&
+        (year === 'all' || ch.year === year) &&
+        ch.name.toLowerCase().includes(query)
+      );
 
-      updateDependentFilters(filtered);
-      renderChannels(filtered);
+      clusterize.update(filteredChannels.map(renderRow));
     }
 
-    function updateDependentFilters(filtered) {
-      const channels = new Set();
-      const qualities = new Set();
-      const years = new Set();
-      filtered.forEach(c => {
-        channels.add(c.channel);
-        qualities.add(c.quality);
-        if (c.year) years.add(c.year);
-      });
-      updateSelect('channelFilter', [...channels]);
-      updateSelect('qualityFilter', [...qualities]);
-      updateSelect('yearFilter', [...years].sort());
+    function renderRow(ch, idx) {
+      return `<tr class="border-b hover:bg-gray-100">
+        <td class="p-2">${ch.name}</td>
+        <td class="p-2 text-right">
+          <button onclick="toggleFavorite(${idx})">${ch.favorite ? '★' : '☆'}</button>
+          <button onclick="playStream('${ch.url}')" class="ml-2 text-blue-600 text-xs">Play</button>
+        </td>
+      </tr>`;
     }
 
-    function renderChannels(channels) {
-      display.innerHTML = '';
-      channels.forEach(ch => {
-        const div = document.createElement('div');
-        div.className = 'flex justify-between items-center border-b py-2 text-sm';
-        div.innerHTML = `
-          <div>
-            <strong>${ch.name}</strong>
-            <span class="ml-2 text-xs text-gray-500">[${ch.language} - ${ch.quality}${ch.year ? ' - ' + ch.year : ''}]</span>
-          </div>
-          <div class="flex gap-2">
-            <button onclick="playStream('${ch.url}')" class="text-blue-600 text-xs">Play</button>
-            <button onclick="toggleFavorite('${ch.url}')" class="text-yellow-500 text-xs">${favorites.has(ch.url) ? '★' : '☆'}</button>
-          </div>
-        `;
-        display.appendChild(div);
-      });
-    }
-
-    function toggleFavorite(url) {
-      if (favorites.has(url)) {
-        favorites.delete(url);
-      } else {
-        favorites.add(url);
-      }
-      localStorage.setItem('favorites', JSON.stringify([...favorites]));
+    function toggleFavorite(idx) {
+      filteredChannels[idx].favorite = !filteredChannels[idx].favorite;
       applyFilters();
     }
 
@@ -206,6 +225,16 @@
       }
       player.play();
     }
+
+    function debouncedFilter() {
+      clearTimeout(window.filterTimer);
+      window.filterTimer = setTimeout(applyFilters, 300);
+    }
+
+    window.onload = () => {
+      const savedURL = localStorage.getItem('playlistURL');
+      if (savedURL) m3uUrlInput.value = savedURL;
+    };
   </script>
 </body>
 </html>
