@@ -4,137 +4,93 @@
   <meta charset="UTF-8">
   <title>IPTV Playlist Viewer</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    .star {
+      cursor: pointer;
+      font-size: 1.2rem;
+    }
+    #playlistDisplay {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+  </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
-  <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-md p-6">
+  <div class="max-w-5xl mx-auto bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-4 text-center">IPTV Playlist Viewer</h1>
 
-    <!-- Mode Toggle -->
-    <div class="flex justify-center gap-2 mb-4">
-      <button id="m3uBtn" class="px-4 py-2 rounded-l bg-blue-600 text-white">M3U URL</button>
-      <button id="xtreamBtn" class="px-4 py-2 rounded-r bg-gray-200 text-black">Xtream Login</button>
+    <!-- M3U Fetch Form -->
+    <div class="flex flex-wrap gap-2 mb-4">
+      <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="flex-grow border p-2 rounded">
+      <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="fetchM3U()">Fetch Playlist</button>
     </div>
 
-    <!-- M3U URL Form -->
-    <div id="m3uForm" class="mb-4">
-      <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="border p-2 w-full mb-2">
-      <div class="flex gap-2">
-        <button onclick="fetchM3U()" class="bg-green-600 text-white px-4 py-2 rounded">Fetch Playlist</button>
-        <button onclick="loadSavedPlaylist()" class="bg-blue-500 text-white px-4 py-2 rounded">Load Saved Playlist</button>
-      </div>
+    <!-- Buttons -->
+    <div class="flex flex-wrap gap-2 items-center mb-4">
+      <button class="bg-orange-500 text-white px-4 py-2 rounded" onclick="exportPlaylistAsM3U()">Download Playlist</button>
+      <label class="cursor-pointer bg-blue-500 text-white px-4 py-2 rounded">
+        Upload Playlist
+        <input type="file" id="uploadM3U" accept=".m3u" class="hidden" onchange="handleM3UUpload(event)">
+      </label>
     </div>
 
-    <!-- Xtream Form -->
-    <div id="xtreamForm" class="hidden mb-4">
-      <input type="text" id="xtreamUrl" placeholder="Base URL" class="border p-2 w-full mb-2">
-      <input type="text" id="xtreamUser" placeholder="Username" class="border p-2 w-full mb-2">
-      <input type="password" id="xtreamPass" placeholder="Password" class="border p-2 w-full mb-2">
-      <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="loadXtream()">Login</button>
+    <!-- Search Bar -->
+    <div class="mb-4">
+      <input type="text" id="searchInput" placeholder="Search channels..." class="border p-2 w-full rounded">
     </div>
 
-    <!-- Filters -->
-    <div id="filters" class="hidden mb-4">
-      <input type="text" id="search" placeholder="Search title..." class="p-2 border rounded w-full mb-2" oninput="applyFilters()">
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        <select id="groupBy" class="p-2 border rounded" onchange="applyFilters()">
-          <option value="group">Group</option>
-          <option value="location">Location</option>
-          <option value="channel">Channel</option>
-          <option value="quality">Quality</option>
-        </select>
-      </div>
+    <!-- Filters and Favorites -->
+    <div class="flex flex-wrap items-center gap-2 mb-6">
+      <select id="languageFilter" class="p-2 border rounded w-1/2">
+        <option value="">Filter by Language</option>
+      </select>
+      <select id="qualityFilter" class="p-2 border rounded w-1/2">
+        <option value="">Filter by Quality</option>
+      </select>
+      <button id="toggleFavoritesBtn" class="ml-auto bg-yellow-400 text-black px-4 py-2 rounded">Favorites</button>
     </div>
-
-    <!-- Loader -->
-    <div id="loader" class="text-center text-blue-500 font-semibold hidden mb-4">Fetching playlist...</div>
 
     <!-- Display Area -->
     <div id="playlistDisplay" class="space-y-4"></div>
-
-    <!-- Player -->
-    <div id="playerContainer" class="hidden fixed bottom-4 right-4 w-80 bg-black rounded shadow-lg">
-      <video id="videoPlayer" controls class="w-full h-48 rounded"></video>
-    </div>
   </div>
 
   <script>
-    let allChannels = [];
-    let currentGroupBy = 'group';
+    let currentPlaylist = [];
+    let filteredPlaylist = [];
+    let favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+    let showingFavorites = false;
+    const BATCH_SIZE = 100;
 
-    const loader = document.getElementById('loader');
-    const filters = document.getElementById('filters');
-    const display = document.getElementById('playlistDisplay');
-    const groupBySelect = document.getElementById('groupBy');
+    const debounce = (func, delay) => {
+      let timeout;
+      return (...args) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), delay);
+      };
+    };
 
-    function showStep(message, isError = false) {
-      loader.textContent = message;
-      loader.classList.remove('hidden');
-      loader.classList.toggle('text-red-500', isError);
-      loader.classList.toggle('text-blue-500', !isError);
-    }
-
-    async function fetchM3U() {
-      const urlInput = document.getElementById('m3uUrl');
-      let url = urlInput.value.trim();
-      if (!url) return alert('Enter M3U URL');
-
-      showStep('Connecting to server...');
-      try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(HTTP error! Status: ${res.status});
-        showStep('Fetching playlist...');
-        const text = await res.text();
-
-        if (!text.includes('#EXTINF')) throw new Error('Invalid playlist format');
-
-        allChannels = parseM3U(text);
-        savePlaylistToLocal(url, text);
-        filters.classList.remove('hidden');
-        showStep('Parsing and displaying...');
-        applyFilters();
-
-        showStep('✅ Playlist loaded successfully');
-      } catch (e) {
-        console.error('Fetch failed:', e);
-        showStep('❌ Failed to fetch playlist. Trying proxy...', true);
-
-        try {
-          const proxiedUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
-          const res = await fetch(proxiedUrl);
-          if (!res.ok) throw new Error(Proxy error! Status: ${res.status});
-          const text = await res.text();
-
-          if (!text.includes('#EXTINF')) throw new Error('Invalid playlist format via proxy');
-
-          allChannels = parseM3U(text);
-          savePlaylistToLocal(url, text);
-          filters.classList.remove('hidden');
-          showStep('✅ Playlist loaded using proxy');
-          applyFilters();
-        } catch (proxyError) {
-          console.error('Proxy fetch failed:', proxyError);
-          showStep('❌ Failed to load playlist even via proxy.', true);
-        }
-      }
-    }
-
-    function savePlaylistToLocal(url, content) {
-      localStorage.setItem('savedPlaylistUrl', url);
-      localStorage.setItem('savedPlaylistData', content);
-    }
-
-    function loadSavedPlaylist() {
-      const data = localStorage.getItem('savedPlaylistData');
-      if (!data) {
-        alert('No saved playlist found. Please fetch one first.');
-        return;
-      }
-      showStep('Loading saved playlist...');
-      allChannels = parseM3U(data);
-      filters.classList.remove('hidden');
+    document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
+    document.getElementById('languageFilter').addEventListener('change', applyFilters);
+    document.getElementById('qualityFilter').addEventListener('change', applyFilters);
+    document.getElementById('toggleFavoritesBtn').addEventListener('click', () => {
+      showingFavorites = !showingFavorites;
+      document.getElementById('toggleFavoritesBtn').textContent = showingFavorites ? 'Back to Playlist' : 'Favorites';
       applyFilters();
-      showStep('✅ Loaded saved playlist');
+    });
+
+    function fetchM3U() {
+      const url = document.getElementById('m3uUrl').value.trim();
+      if (!url) return alert('Please enter a URL.');
+
+      fetch(url)
+        .then(res => res.text())
+        .then(data => {
+          parseM3U(data);
+        })
+        .catch(err => {
+          console.error('Fetch error:', err);
+          alert('Failed to fetch playlist.');
+        });
     }
 
     function parseM3U(text) {
@@ -146,88 +102,146 @@
         if (line.startsWith('#EXTINF')) {
           const nameMatch = line.match(/,(.*)/);
           const groupMatch = line.match(/group-title="(.*?)"/i);
-          const tvgType = line.includes('catchup') ? 'vod' : 'live';
           current = {
             name: nameMatch ? nameMatch[1] : 'Unknown',
-            group: groupMatch ? groupMatch[1] : 'Other',
-            type: tvgType
+            group: groupMatch ? groupMatch[1] : 'Other'
           };
         } else if (line && !line.startsWith('#')) {
           current.url = line;
           channels.push({ ...current });
         }
       }
+      currentPlaylist = channels;
+      populateFilters(channels);
+      applyFilters();
       return channels;
     }
 
+    function populateFilters(channels) {
+      const languageSelect = document.getElementById('languageFilter');
+      const qualitySelect = document.getElementById('qualityFilter');
+      const languages = new Set();
+      const qualities = new Set();
+
+      channels.forEach(ch => {
+        const name = ch.name;
+        const langMatch = name.match(/^([A-Z]{2})[:\s-]/);
+        const lang = langMatch ? langMatch[1] : 'Other';
+        languages.add(lang);
+
+        if (/UHD|4K/i.test(name)) qualities.add('UHD');
+        else if (/FHD|1080p/i.test(name)) qualities.add('FHD');
+        else if (/HD|720p/i.test(name)) qualities.add('HD');
+        else if (/SD|480p/i.test(name)) qualities.add('SD');
+        else qualities.add('Unknown');
+      });
+
+      languageSelect.innerHTML = '<option value="">Filter by Language</option>' + Array.from(languages).sort().map(l => `<option value="${l}">${l}</option>`).join('');
+      qualitySelect.innerHTML = '<option value="">Filter by Quality</option>' + Array.from(qualities).sort().map(q => `<option value="${q}">${q}</option>`).join('');
+    }
+
     function applyFilters() {
-      const query = document.getElementById('search').value.toLowerCase();
-      const groupBy = groupBySelect.value;
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const lang = document.getElementById('languageFilter').value;
+      const quality = document.getElementById('qualityFilter').value;
 
-      let filtered = allChannels.filter(c =>
-        c.name.toLowerCase().includes(query)
-      );
-
-      const groups = {};
-      filtered.forEach(ch => {
-        let key = groupKey(ch, groupBy);
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(ch);
+      let filtered = currentPlaylist.filter(ch => {
+        const matchesSearch = ch.name.toLowerCase().includes(search);
+        const matchesLang = !lang || ch.name.startsWith(lang);
+        const matchesQuality = !quality || (
+          (quality === 'UHD' && /UHD|4K/i.test(ch.name)) ||
+          (quality === 'FHD' && /FHD|1080p/i.test(ch.name)) ||
+          (quality === 'HD' && /HD|720p/i.test(ch.name)) ||
+          (quality === 'SD' && /SD|480p/i.test(ch.name)) ||
+          (quality === 'Unknown' && !/(UHD|4K|FHD|1080p|HD|720p|SD|480p)/i.test(ch.name))
+        );
+        return matchesSearch && matchesLang && matchesQuality;
       });
 
+      if (showingFavorites) {
+        filtered = filtered.filter(ch => favorites.includes(ch.url));
+      }
+
+      filteredPlaylist = filtered;
+      renderVisibleRows(0);
+    }
+
+    function renderVisibleRows(startIndex) {
+      const display = document.getElementById('playlistDisplay');
       display.innerHTML = '';
-      Object.entries(groups).forEach(([group, chs]) => {
-        const groupDiv = document.createElement('div');
-        groupDiv.className = 'bg-gray-50 p-4 rounded shadow';
-        const title = document.createElement('h2');
-        title.className = 'text-xl font-semibold mb-2';
-        title.textContent = group;
-        groupDiv.appendChild(title);
+      const fragment = document.createDocumentFragment();
+      const endIndex = Math.min(startIndex + BATCH_SIZE, filteredPlaylist.length);
+      for (let i = startIndex; i < endIndex; i++) {
+        const ch = filteredPlaylist[i];
+        const div = document.createElement('div');
+        div.className = 'flex justify-between items-center border-b py-1 text-sm';
 
-        chs.forEach(ch => {
-          const div = document.createElement('div');
-          div.className = 'flex justify-between items-center border-b py-1 text-sm';
-          div.innerHTML = `
-            <span>${ch.name} <span class="ml-2 text-xs text-gray-400">(${ch.type.toUpperCase()})</span></span>
-            <button onclick="playStream('${ch.url}')" class="text-blue-600 text-xs">Play</button>
-          `;
-          groupDiv.appendChild(div);
-        });
+        const isFavorite = favorites.includes(ch.url);
+        div.innerHTML = `
+          <span class="truncate">${ch.name}</span>
+          <div class="flex items-center gap-2">
+            <span class="star" data-url="${ch.url}">${isFavorite ? '★' : '☆'}</span>
+            <a href="${ch.url}" target="_blank" class="text-blue-600 text-xs">Play</a>
+          </div>
+        `;
+        fragment.appendChild(div);
+      }
+      display.appendChild(fragment);
+    }
 
-        display.appendChild(groupDiv);
+    document.getElementById('playlistDisplay').addEventListener('scroll', () => {
+      const display = document.getElementById('playlistDisplay');
+      const rowHeight = 32;
+      const startIndex = Math.floor(display.scrollTop / rowHeight);
+      renderVisibleRows(startIndex);
+    });
+
+    document.getElementById('playlistDisplay').addEventListener('click', function(e) {
+      if (e.target.classList.contains('star')) {
+        const url = e.target.getAttribute('data-url');
+        const idx = favorites.indexOf(url);
+        if (idx >= 0) favorites.splice(idx, 1);
+        else favorites.push(url);
+        localStorage.setItem('favorites', JSON.stringify(favorites));
+        e.target.textContent = favorites.includes(url) ? '★' : '☆';
+      }
+    });
+
+    function handleM3UUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return alert('No file selected.');
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = e.target.result;
+        try {
+          parseM3U(text);
+          alert('Playlist loaded successfully!');
+        } catch (err) {
+          console.error('Error parsing uploaded file:', err);
+          alert('Failed to parse uploaded M3U file.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function exportPlaylistAsM3U() {
+      if (!currentPlaylist || currentPlaylist.length === 0) {
+        return alert('No playlist to export.');
+      }
+
+      let content = "#EXTM3U\n";
+      currentPlaylist.forEach(ch => {
+        content += `#EXTINF:-1 group-title="${ch.group}",${ch.name}\n${ch.url}\n`;
       });
-    }
 
-    function groupKey(ch, mode) {
-      switch (mode) {
-        case 'location':
-          const loc = ch.name.match(/^([A-Z]{2})[:\s-]/);
-          return loc ? loc[1] : 'Other';
-        case 'channel':
-          return ch.name.replace(/HD|FHD|UHD|4K|SD|\d{3,4}p/gi, '').trim();
-        case 'quality':
-          if (/UHD|4K/i.test(ch.name)) return 'UHD';
-          if (/FHD|1080p/i.test(ch.name)) return 'FHD';
-          if (/HD|720p/i.test(ch.name)) return 'HD';
-          if (/SD|480p/i.test(ch.name)) return 'SD';
-          return 'Unknown';
-        default:
-          return ch.group || 'Other';
-      }
-    }
-
-    function playStream(url) {
-      const player = document.getElementById('videoPlayer');
-      const container = document.getElementById('playerContainer');
-      container.classList.remove('hidden');
-      if (Hls.isSupported()) {
-        const hls = new Hls();
-        hls.loadSource(url);
-        hls.attachMedia(player);
-      } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
-        player.src = url;
-      }
-      player.play();
+      const blob = new Blob([content], { type: 'audio/x-mpegurl' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'playlist.m3u';
+      a.click();
+      URL.revokeObjectURL(url);
     }
   </script>
 </body>
