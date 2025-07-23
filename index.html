@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IPTV Playlist Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+  <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-md p-6">
+    <h1 class="text-2xl font-bold mb-4 text-center">IPTV Playlist Viewer</h1>
+
+    <!-- Mode Toggle -->
+    <div class="flex justify-center gap-2 mb-4">
+      <button id="m3uBtn" class="px-4 py-2 rounded-l bg-blue-600 text-white">M3U URL</button>
+      <button id="xtreamBtn" class="px-4 py-2 rounded-r bg-gray-200 text-black">Xtream Login</button>
+    </div>
+
+    <!-- M3U URL Form -->
+    <div id="m3uForm" class="mb-4">
+      <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="border p-2 w-full mb-2">
+      <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="fetchM3U()">Fetch Playlist</button>
+    </div>
+
+    <!-- Xtream Form -->
+    <div id="xtreamForm" class="hidden mb-4">
+      <input type="text" id="xtreamUrl" placeholder="Base URL" class="border p-2 w-full mb-2">
+      <input type="text" id="xtreamUser" placeholder="Username" class="border p-2 w-full mb-2">
+      <input type="password" id="xtreamPass" placeholder="Password" class="border p-2 w-full mb-2">
+      <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="loadXtream()">Login</button>
+    </div>
+
+    <!-- Filters -->
+    <div id="filters" class="hidden mb-4">
+      <input type="text" id="search" placeholder="Search title..." class="p-2 border rounded w-full mb-2" oninput="applyFilters()">
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <select id="languageFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+        <select id="channelFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+        <select id="qualityFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+        <select id="yearFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+      </div>
+    </div>
+
+    <!-- Loader -->
+    <div id="loader" class="text-center text-blue-500 font-semibold hidden mb-4">Fetching playlist...</div>
+
+    <!-- Display Area -->
+    <div id="playlistDisplay" class="space-y-4"></div>
+
+    <!-- Player -->
+    <div id="playerContainer" class="hidden fixed bottom-4 right-4 w-80 bg-black rounded shadow-lg">
+      <video id="videoPlayer" controls class="w-full h-48 rounded"></video>
+    </div>
+  </div>
+
+  <script>
+    let allChannels = [];
+    let favorites = new Set(JSON.parse(localStorage.getItem('favorites') || '[]'));
+    let savedUrl = localStorage.getItem('lastUrl') || '';
+    document.getElementById('m3uUrl').value = savedUrl;
+
+    const loader = document.getElementById('loader');
+    const filters = document.getElementById('filters');
+    const display = document.getElementById('playlistDisplay');
+
+    async function fetchM3U() {
+      const url = document.getElementById('m3uUrl').value;
+      if (!url) return alert('Enter M3U URL');
+      localStorage.setItem('lastUrl', url);
+      loader.classList.remove('hidden');
+      try {
+        const res = await fetch(url);
+        const text = await res.text();
+        allChannels = parseM3U(text);
+        populateFilters();
+        filters.classList.remove('hidden');
+        applyFilters();
+      } catch (e) {
+        alert('Failed to fetch M3U');
+      } finally {
+        loader.classList.add('hidden');
+      }
+    }
+
+    function parseM3U(text) {
+      const lines = text.split('\n');
+      const channels = [];
+      let current = {};
+      for (let line of lines) {
+        line = line.trim();
+        if (line.startsWith('#EXTINF')) {
+          const nameMatch = line.match(/,(.*)/);
+          const groupMatch = line.match(/group-title="(.*?)"/i);
+          const tvgIdMatch = line.match(/tvg-id="(.*?)"/i);
+          const yearMatch = line.match(/\b(19|20)\d{2}\b/);
+          current = {
+            name: nameMatch ? nameMatch[1] : 'Unknown',
+            group: groupMatch ? groupMatch[1] : 'Other',
+            year: yearMatch ? yearMatch[0] : '',
+            language: /\bFR\b/i.test(line) ? 'FR' : (/\bEN\b/i.test(line) ? 'EN' : 'Other'),
+            quality: /UHD|4K/i.test(line) ? 'UHD' : (/FHD|1080p/i.test(line) ? 'FHD' : (/HD|720p/i.test(line) ? 'HD' : (/SD|480p/i.test(line) ? 'SD' : 'Unknown'))),
+            channel: nameMatch ? nameMatch[1].replace(/HD|FHD|UHD|4K|SD|\d{3,4}p/gi, '').trim() : 'Unknown'
+          };
+        } else if (line && !line.startsWith('#')) {
+          current.url = line;
+          channels.push({ ...current });
+        }
+      }
+      return channels;
+    }
+
+    function populateFilters() {
+      const languages = new Set();
+      const channels = new Set();
+      const qualities = new Set();
+      const years = new Set();
+      allChannels.forEach(c => {
+        languages.add(c.language);
+        channels.add(c.channel);
+        qualities.add(c.quality);
+        if (c.year) years.add(c.year);
+      });
+      updateSelect('languageFilter', [...languages]);
+      updateSelect('channelFilter', [...channels]);
+      updateSelect('qualityFilter', [...qualities]);
+      updateSelect('yearFilter', [...years].sort());
+    }
+
+    function updateSelect(id, values) {
+      const select = document.getElementById(id);
+      select.innerHTML = <option value="">All</option> + values.map(v => <option>${v}</option>).join('');
+    }
+
+    function applyFilters() {
+      const search = document.getElementById('search').value.toLowerCase();
+      const lang = document.getElementById('languageFilter').value;
+      const chan = document.getElementById('channelFilter').value;
+      const qual = document.getElementById('qualityFilter').value;
+      const year = document.getElementById('yearFilter').value;
+
+      const filtered = allChannels.filter(c => {
+        return (!lang || c.language === lang) &&
+               (!chan || c.channel === chan) &&
+               (!qual || c.quality === qual) &&
+               (!year || c.year === year) &&
+               c.name.toLowerCase().includes(search);
+      });
+
+      updateDependentFilters(filtered);
+      renderChannels(filtered);
+    }
+
+    function updateDependentFilters(filtered) {
+      const channels = new Set();
+      const qualities = new Set();
+      const years = new Set();
+      filtered.forEach(c => {
+        channels.add(c.channel);
+        qualities.add(c.quality);
+        if (c.year) years.add(c.year);
+      });
+      updateSelect('channelFilter', [...channels]);
+      updateSelect('qualityFilter', [...qualities]);
+      updateSelect('yearFilter', [...years].sort());
+    }
+
+    function renderChannels(channels) {
+      display.innerHTML = '';
+      channels.forEach(ch => {
+        const div = document.createElement('div');
+        div.className = 'flex justify-between items-center border-b py-2 text-sm';
+        div.innerHTML = `
+          <div>
+            <strong>${ch.name}</strong>
+            <span class="ml-2 text-xs text-gray-500">[${ch.language} - ${ch.quality}${ch.year ? ' - ' + ch.year : ''}]</span>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="playStream('${ch.url}')" class="text-blue-600 text-xs">Play</button>
+            <button onclick="toggleFavorite('${ch.url}')" class="text-yellow-500 text-xs">${favorites.has(ch.url) ? '★' : '☆'}</button>
+          </div>
+        `;
+        display.appendChild(div);
+      });
+    }
+
+    function toggleFavorite(url) {
+      if (favorites.has(url)) {
+        favorites.delete(url);
+      } else {
+        favorites.add(url);
+      }
+      localStorage.setItem('favorites', JSON.stringify([...favorites]));
+      applyFilters();
+    }
+
+    function playStream(url) {
+      const player = document.getElementById('videoPlayer');
+      const container = document.getElementById('playerContainer');
+      container.classList.remove('hidden');
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(url);
+        hls.attachMedia(player);
+      } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+        player.src = url;
+      }
+      player.play();
+    }
+  </script>
+</body>
+</html>
