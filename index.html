@@ -1,130 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>IPTV Playlist Viewer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <script src="https://cdn.jsdelivr.net/npm/clusterize.js@0.18.1/clusterize.min.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
   <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-4 text-center">IPTV Playlist Viewer</h1>
 
-    <!-- Mode Toggle -->
-    <div class="flex justify-center gap-2 mb-4">
-      <button id="m3uBtn" class="px-4 py-2 rounded-l bg-blue-600 text-white">M3U URL</button>
-      <button id="xtreamBtn" class="px-4 py-2 rounded-r bg-gray-200 text-black">Xtream Login</button>
-    </div>
-
-    <!-- M3U URL Form -->
+    <!-- URL Input -->
     <div id="m3uForm" class="mb-4">
       <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="border p-2 w-full mb-2">
       <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="fetchM3U()">Fetch Playlist</button>
-      <button class="bg-yellow-500 text-white px-4 py-2 rounded ml-2" onclick="loadFromStorage()">Load Cached</button>
     </div>
 
-    <!-- Xtream Form -->
-    <div id="xtreamForm" class="hidden mb-4">
-      <input type="text" id="xtreamUrl" placeholder="Base URL" class="border p-2 w-full mb-2">
-      <input type="text" id="xtreamUser" placeholder="Username" class="border p-2 w-full mb-2">
-      <input type="password" id="xtreamPass" placeholder="Password" class="border p-2 w-full mb-2">
-      <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="loadXtream()">Login</button>
-    </div>
-
-    <!-- Status Bar -->
-    <div id="statusBar" class="text-center text-sm text-gray-600 mb-2"></div>
+    <!-- Loader with Steps -->
+    <div id="loader" class="text-center text-blue-500 font-semibold hidden mb-4">Fetching playlist...</div>
 
     <!-- Filters -->
-    <div id="filters" class="hidden mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-5 gap-2">
-        <select id="languageFilter" class="p-2 border rounded" onchange="applyFilters()">
-          <option value="all">Language</option>
-        </select>
-        <select id="channelFilter" class="p-2 border rounded" onchange="applyFilters()">
-          <option value="all">Channel</option>
-        </select>
-        <select id="qualityFilter" class="p-2 border rounded" onchange="applyFilters()">
-          <option value="all">Quality</option>
-        </select>
-        <select id="yearFilter" class="p-2 border rounded" onchange="applyFilters()">
-          <option value="all">Year</option>
-        </select>
-        <input type="text" id="search" placeholder="Search title..." class="p-2 border rounded" oninput="debouncedFilter()">
+    <div id="filters" class="hidden mb-4 space-y-2">
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <select id="languageFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+        <select id="channelFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+        <select id="qualityFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
+        <select id="yearFilter" class="p-2 border rounded" onchange="applyFilters()"></select>
       </div>
+      <input type="text" id="search" placeholder="Search title..." class="p-2 border rounded w-full" oninput="applyFilters()">
     </div>
 
-    <!-- Playlist Display with Clusterize.js -->
-    <div id="playlistWrapper" class="border rounded h-[500px] overflow-auto">
-      <table class="table-auto w-full text-sm">
-        <tbody id="playlistContent" class="clusterize-content"></tbody>
-      </table>
-    </div>
+    <!-- Playlist Display -->
+    <div id="playlistDisplay" class="space-y-4"></div>
 
-    <!-- Player -->
+    <!-- Video Player -->
     <div id="playerContainer" class="hidden fixed bottom-4 right-4 w-80 bg-black rounded shadow-lg">
       <video id="videoPlayer" controls class="w-full h-48 rounded"></video>
     </div>
   </div>
 
   <script>
-    let allChannels = [], filteredChannels = [], favorites = new Set();
-    let clusterize = new Clusterize({
-      rows: [],
-      scrollId: 'playlistWrapper',
-      contentId: 'playlistContent'
-    });
-
-    const statusBar = document.getElementById('statusBar');
-    const filtersDiv = document.getElementById('filters');
-    const m3uUrlInput = document.getElementById('m3uUrl');
-
-    function setStatus(msg, isError = false) {
-      statusBar.textContent = msg;
-      statusBar.className = text-center text-sm ${isError ? 'text-red-600' : 'text-gray-600'} mb-2;
-    }
-
-    function savePlaylist(url, data) {
-      localStorage.setItem('playlistURL', url);
-      localStorage.setItem('playlistData', JSON.stringify(data));
-    }
-
-    function loadFromStorage() {
-      const data = localStorage.getItem('playlistData');
-      const url = localStorage.getItem('playlistURL');
-      if (data) {
-        m3uUrlInput.value = url;
-        allChannels = JSON.parse(data);
-        populateFilters();
-        applyFilters();
-        setStatus('Loaded from cache');
-      } else {
-        setStatus('No cached data found', true);
-      }
-    }
+    let allChannels = [];
+    let favorites = new Set();
 
     async function fetchM3U() {
-      const url = m3uUrlInput.value;
+      const urlInput = document.getElementById('m3uUrl');
+      let url = urlInput.value.trim();
       if (!url) return alert('Enter M3U URL');
 
-      setStatus('Connecting to server...');
+      showStep('Connecting to server...');
       try {
         const res = await fetch(url);
-        if (!res.ok) throw new Error('Connection failed');
-
-        setStatus('Fetching playlist...');
+        if (!res.ok) throw new Error(HTTP error! Status: ${res.status});
+        showStep('Fetching playlist...');
         const text = await res.text();
-        setStatus('Parsing playlist...');
+
+        if (!text.includes('#EXTINF')) throw new Error('Invalid playlist format');
 
         allChannels = parseM3U(text);
-        savePlaylist(url, allChannels);
-        populateFilters();
+        localStorage.setItem('playlistUrl', url);
+        showStep('Parsing and displaying...');
+        updateFilterOptions();
         applyFilters();
-        setStatus(Loaded ${allChannels.length} channels);
-        filtersDiv.classList.remove('hidden');
+        showStep('✅ Playlist loaded successfully');
+        document.getElementById('filters').classList.remove('hidden');
       } catch (e) {
-        setStatus(Error: ${e.message}, true);
+        console.error('Fetch failed:', e);
+        showStep('❌ Fetch failed. Trying with proxy...', true);
+        try {
+          const proxiedUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
+          const res = await fetch(proxiedUrl);
+          if (!res.ok) throw new Error(Proxy error! Status: ${res.status});
+          const text = await res.text();
+
+          if (!text.includes('#EXTINF')) throw new Error('Invalid playlist format via proxy');
+
+          allChannels = parseM3U(text);
+          localStorage.setItem('playlistUrl', url);
+          showStep('✅ Playlist loaded using proxy');
+          updateFilterOptions();
+          applyFilters();
+          document.getElementById('filters').classList.remove('hidden');
+        } catch (proxyError) {
+          console.error('Proxy fetch failed:', proxyError);
+          showStep('❌ Failed to load playlist even via proxy.', true);
+        }
       }
+    }
+
+    function showStep(message, isError = false) {
+      const loader = document.getElementById('loader');
+      loader.textContent = message;
+      loader.classList.remove('hidden');
+      loader.classList.toggle('text-red-500', isError);
+      loader.classList.toggle('text-blue-500', !isError);
     }
 
     function parseM3U(text) {
@@ -136,47 +105,67 @@
         if (line.startsWith('#EXTINF')) {
           const nameMatch = line.match(/,(.*)/);
           const groupMatch = line.match(/group-title="(.*?)"/i);
-          const yearMatch = line.match(/year=(\d{4})/i);
           current = {
             name: nameMatch ? nameMatch[1] : 'Unknown',
             group: groupMatch ? groupMatch[1] : 'Other',
-            language: /\bFR\b/i.test(line) ? 'FR' : /\bEN\b/i.test(line) ? 'EN' : 'Other',
-            quality: /UHD|4K/i.test(line) ? 'UHD' : /FHD|1080p/i.test(line) ? 'FHD' : /HD|720p/i.test(line) ? 'HD' : /SD|480p/i.test(line) ? 'SD' : 'Unknown',
-            year: yearMatch ? yearMatch[1] : 'Unknown'
+            quality: getQuality(nameMatch ? nameMatch[1] : ''),
+            language: getLanguage(nameMatch ? nameMatch[1] : ''),
+            year: getYear(nameMatch ? nameMatch[1] : ''),
           };
         } else if (line && !line.startsWith('#')) {
           current.url = line;
-          current.favorite = false;
           channels.push({ ...current });
         }
       }
       return channels;
     }
 
-    function populateFilters() {
-      const langSet = new Set(), chanSet = new Set(), qualSet = new Set(), yearSet = new Set();
-      allChannels.forEach(ch => {
-        langSet.add(ch.language);
-        chanSet.add(ch.group);
-        qualSet.add(ch.quality);
-        yearSet.add(ch.year);
-      });
-
-      populateDropdown('languageFilter', langSet);
-      populateDropdown('channelFilter', chanSet);
-      populateDropdown('qualityFilter', qualSet);
-      populateDropdown('yearFilter', yearSet);
+    function getQuality(name) {
+      if (/UHD|4K/i.test(name)) return 'UHD';
+      if (/FHD|1080p/i.test(name)) return 'FHD';
+      if (/HD|720p/i.test(name)) return 'HD';
+      if (/SD|480p/i.test(name)) return 'SD';
+      return 'Unknown';
     }
 
-    function populateDropdown(id, values) {
-      const el = document.getElementById(id);
-      el.innerHTML = '<option value="all">' + el.options[0].textContent + '</option>';
-      Array.from(values).sort().forEach(val => {
-        const opt = document.createElement('option');
-        opt.value = val;
-        opt.textContent = val;
-        el.appendChild(opt);
+    function getLanguage(name) {
+      if (/\bFR\b|\bFRA\b|\bFrench\b/i.test(name)) return 'FR';
+      if (/\bEN\b|\bENG\b|\bEnglish\b/i.test(name)) return 'EN';
+      return 'Other';
+    }
+
+    function getYear(name) {
+      const yearMatch = name.match(/\b(19|20)\d{2}\b/);
+      return yearMatch ? yearMatch[0] : 'Unknown';
+    }
+
+    function updateFilterOptions() {
+      const languageSet = new Set();
+      const channelSet = new Set();
+      const qualitySet = new Set();
+      const yearSet = new Set();
+
+      allChannels.forEach(c => {
+        languageSet.add(c.language);
+        channelSet.add(cleanChannelName(c.name));
+        qualitySet.add(c.quality);
+        yearSet.add(c.year);
       });
+
+      populateSelect('languageFilter', Array.from(languageSet));
+      populateSelect('channelFilter', Array.from(channelSet));
+      populateSelect('qualityFilter', Array.from(qualitySet));
+      populateSelect('yearFilter', Array.from(yearSet));
+    }
+
+    function populateSelect(id, values) {
+      const select = document.getElementById(id);
+      select.innerHTML = '<option value="all">All</option>' +
+        values.sort().map(v => <option value="${v}">${v}</option>).join('');
+    }
+
+    function cleanChannelName(name) {
+      return name.replace(/HD|FHD|UHD|4K|SD|\d{3,4}p/gi, '').trim();
     }
 
     function applyFilters() {
@@ -184,32 +173,34 @@
       const chan = document.getElementById('channelFilter').value;
       const qual = document.getElementById('qualityFilter').value;
       const year = document.getElementById('yearFilter').value;
-      const query = document.getElementById('search').value.toLowerCase();
+      const search = document.getElementById('search').value.toLowerCase();
 
-      filteredChannels = allChannels.filter(ch =>
-        (lang === 'all' || ch.language === lang) &&
-        (chan === 'all' || ch.group === chan) &&
-        (qual === 'all' || ch.quality === qual) &&
-        (year === 'all' || ch.year === year) &&
-        ch.name.toLowerCase().includes(query)
+      let filtered = allChannels.filter(c =>
+        (lang === 'all' || c.language === lang) &&
+        (chan === 'all' || cleanChannelName(c.name) === chan) &&
+        (qual === 'all' || c.quality === qual) &&
+        (year === 'all' || c.year === year) &&
+        c.name.toLowerCase().includes(search)
       );
 
-      clusterize.update(filteredChannels.map(renderRow));
+      renderPlaylist(filtered);
     }
 
-    function renderRow(ch, idx) {
-      return `<tr class="border-b hover:bg-gray-100">
-        <td class="p-2">${ch.name}</td>
-        <td class="p-2 text-right">
-          <button onclick="toggleFavorite(${idx})">${ch.favorite ? '★' : '☆'}</button>
-          <button onclick="playStream('${ch.url}')" class="ml-2 text-blue-600 text-xs">Play</button>
-        </td>
-      </tr>`;
-    }
-
-    function toggleFavorite(idx) {
-      filteredChannels[idx].favorite = !filteredChannels[idx].favorite;
-      applyFilters();
+    function renderPlaylist(channels) {
+      const display = document.getElementById('playlistDisplay');
+      display.innerHTML = '';
+      channels.forEach(ch => {
+        const div = document.createElement('div');
+        div.className = 'flex justify-between items-center border-b py-1 text-sm';
+        div.innerHTML = `
+          <span>${ch.name}</span>
+          <div class="flex gap-2">
+            <button onclick="playStream('${ch.url}')" class="text-blue-600 text-xs">Play</button>
+            <button onclick="toggleFavorite('${ch.name}')" class="text-yellow-500 text-xs">★</button>
+          </div>
+        `;
+        display.appendChild(div);
+      });
     }
 
     function playStream(url) {
@@ -226,15 +217,26 @@
       player.play();
     }
 
-    function debouncedFilter() {
-      clearTimeout(window.filterTimer);
-      window.filterTimer = setTimeout(applyFilters, 300);
+    function toggleFavorite(name) {
+      if (favorites.has(name)) {
+        favorites.delete(name);
+      } else {
+        favorites.add(name);
+      }
+      localStorage.setItem('favorites', JSON.stringify([...favorites]));
+      applyFilters();
     }
 
+    // On page load
     window.onload = () => {
-      const savedURL = localStorage.getItem('playlistURL');
-      if (savedURL) m3uUrlInput.value = savedURL;
-    };
+      const savedUrl = localStorage.getItem('playlistUrl');
+      const savedFavs = JSON.parse(localStorage.getItem('favorites') || '[]');
+      favorites = new Set(savedFavs);
+      if (savedUrl) {
+        document.getElementById('m3uUrl').value = savedUrl;
+        fetchM3U();
+      }
+    }
   </script>
 </body>
 </html>
