@@ -9,14 +9,15 @@
       cursor: pointer;
       font-size: 1.2rem;
     }
-    #playlistDisplay {
-      max-height: 600px;
+    #playlistScroll {
+      height: 500px;
       overflow-y: auto;
+      scroll-behavior: smooth;
     }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
-  <div class="max-w-5xl mx-auto bg-white rounded-2xl shadow-md p-6">
+  <div class="w-full sm:max-w-5xl mx-auto bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-4 text-center">IPTV Playlist Viewer</h1>
 
     <!-- M3U Fetch Form -->
@@ -40,7 +41,7 @@
     </div>
 
     <!-- Filters and Favorites -->
-    <div class="flex flex-wrap items-center gap-2 mb-6">
+    <div class="flex flex-wrap items-center gap-2 mb-4">
       <select id="languageFilter" class="p-2 border rounded w-1/2">
         <option value="">Filter by Language</option>
       </select>
@@ -50,24 +51,19 @@
       <button id="toggleFavoritesBtn" class="ml-auto bg-yellow-400 text-black px-4 py-2 rounded">Favorites</button>
     </div>
 
-    <!-- Display Area -->
-    <div id="playlistDisplay" class="space-y-4"></div>
+    <!-- Scrollable Playlist Container -->
+    <div id="playlistScroll" class="bg-gray-50 border rounded p-2">
+      <div id="playlistDisplay" class="space-y-2"></div>
+    </div>
   </div>
 
   <script>
     let currentPlaylist = [];
-    let filteredPlaylist = [];
     let favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
     let showingFavorites = false;
-    const BATCH_SIZE = 100;
-
-    const debounce = (func, delay) => {
-      let timeout;
-      return (...args) => {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this, args), delay);
-      };
-    };
+    let filteredPlaylist = [];
+    let rowHeight = 32; // approx height of each item in px
+    let visibleCount = 100;
 
     document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
     document.getElementById('languageFilter').addEventListener('change', applyFilters);
@@ -77,6 +73,9 @@
       document.getElementById('toggleFavoritesBtn').textContent = showingFavorites ? 'Back to Playlist' : 'Favorites';
       applyFilters();
     });
+    document.getElementById('playlistScroll').addEventListener('scroll', () => {
+      renderVisibleRows();
+    });
 
     function fetchM3U() {
       const url = document.getElementById('m3uUrl').value.trim();
@@ -84,9 +83,7 @@
 
       fetch(url)
         .then(res => res.text())
-        .then(data => {
-          parseM3U(data);
-        })
+        .then(data => parseM3U(data))
         .catch(err => {
           console.error('Fetch error:', err);
           alert('Failed to fetch playlist.');
@@ -114,7 +111,6 @@
       currentPlaylist = channels;
       populateFilters(channels);
       applyFilters();
-      return channels;
     }
 
     function populateFilters(channels) {
@@ -145,7 +141,7 @@
       const lang = document.getElementById('languageFilter').value;
       const quality = document.getElementById('qualityFilter').value;
 
-      let filtered = currentPlaylist.filter(ch => {
+      filteredPlaylist = currentPlaylist.filter(ch => {
         const matchesSearch = ch.name.toLowerCase().includes(search);
         const matchesLang = !lang || ch.name.startsWith(lang);
         const matchesQuality = !quality || (
@@ -159,19 +155,21 @@
       });
 
       if (showingFavorites) {
-        filtered = filtered.filter(ch => favorites.includes(ch.url));
+        filteredPlaylist = filteredPlaylist.filter(ch => favorites.includes(ch.url));
       }
 
-      filteredPlaylist = filtered;
-      renderVisibleRows(0);
+      renderVisibleRows();
     }
 
-    function renderVisibleRows(startIndex) {
+    function renderVisibleRows() {
+      const scrollTop = document.getElementById('playlistScroll').scrollTop;
+      const start = Math.floor(scrollTop / rowHeight);
+      const end = start + visibleCount + 10;
+
       const display = document.getElementById('playlistDisplay');
       display.innerHTML = '';
-      const fragment = document.createDocumentFragment();
-      const endIndex = Math.min(startIndex + BATCH_SIZE, filteredPlaylist.length);
-      for (let i = startIndex; i < endIndex; i++) {
+
+      for (let i = start; i < Math.min(end, filteredPlaylist.length); i++) {
         const ch = filteredPlaylist[i];
         const div = document.createElement('div');
         div.className = 'flex justify-between items-center border-b py-1 text-sm';
@@ -180,32 +178,21 @@
         div.innerHTML = `
           <span class="truncate">${ch.name}</span>
           <div class="flex items-center gap-2">
-            <span class="star" data-url="${ch.url}">${isFavorite ? '★' : '☆'}</span>
+            <span class="star" onclick="toggleFavorite('${ch.url}')">${isFavorite ? '★' : '☆'}</span>
             <a href="${ch.url}" target="_blank" class="text-blue-600 text-xs">Play</a>
           </div>
         `;
-        fragment.appendChild(div);
+        display.appendChild(div);
       }
-      display.appendChild(fragment);
     }
 
-    document.getElementById('playlistDisplay').addEventListener('scroll', () => {
-      const display = document.getElementById('playlistDisplay');
-      const rowHeight = 32;
-      const startIndex = Math.floor(display.scrollTop / rowHeight);
-      renderVisibleRows(startIndex);
-    });
-
-    document.getElementById('playlistDisplay').addEventListener('click', function(e) {
-      if (e.target.classList.contains('star')) {
-        const url = e.target.getAttribute('data-url');
-        const idx = favorites.indexOf(url);
-        if (idx >= 0) favorites.splice(idx, 1);
-        else favorites.push(url);
-        localStorage.setItem('favorites', JSON.stringify(favorites));
-        e.target.textContent = favorites.includes(url) ? '★' : '☆';
-      }
-    });
+    function toggleFavorite(url) {
+      const idx = favorites.indexOf(url);
+      if (idx >= 0) favorites.splice(idx, 1);
+      else favorites.push(url);
+      localStorage.setItem('favorites', JSON.stringify(favorites));
+      applyFilters();
+    }
 
     function handleM3UUpload(event) {
       const file = event.target.files[0];
@@ -213,12 +200,11 @@
 
       const reader = new FileReader();
       reader.onload = function(e) {
-        const text = e.target.result;
         try {
-          parseM3U(text);
+          parseM3U(e.target.result);
           alert('Playlist loaded successfully!');
         } catch (err) {
-          console.error('Error parsing uploaded file:', err);
+          console.error('Parse error:', err);
           alert('Failed to parse uploaded M3U file.');
         }
       };
@@ -242,6 +228,14 @@
       a.download = 'playlist.m3u';
       a.click();
       URL.revokeObjectURL(url);
+    }
+
+    function debounce(fn, delay) {
+      let timer;
+      return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+      };
     }
   </script>
 </body>
