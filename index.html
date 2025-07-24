@@ -10,15 +10,16 @@
       font-size: 1.2rem;
     }
     #playlistScroll {
-      height: 500px;
+      height: calc(100vh - 320px);
       overflow-y: auto;
       scroll-behavior: smooth;
     }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
-  <div class="w-full sm:max-w-5xl mx-auto bg-white rounded-2xl shadow-md p-6">
-    <h1 class="text-2xl font-bold mb-4 text-center">IPTV Playlist Viewer</h1>
+  <div class="w-full bg-white rounded-2xl shadow-md p-6">
+    <h1 class="text-2xl font-bold mb-2 text-center">IPTV Playlist Viewer</h1>
+    <p class="text-gray-500 text-xs text-center mb-4">Version 1.0.7</p>
 
     <!-- M3U Fetch Form -->
     <div class="flex flex-wrap gap-2 mb-4">
@@ -42,11 +43,14 @@
 
     <!-- Filters and Favorites -->
     <div class="flex flex-wrap items-center gap-2 mb-4">
-      <select id="languageFilter" class="p-2 border rounded w-1/2">
+      <select id="languageFilter" class="p-2 border rounded w-1/3">
         <option value="">Filter by Language</option>
       </select>
-      <select id="qualityFilter" class="p-2 border rounded w-1/2">
+      <select id="qualityFilter" class="p-2 border rounded w-1/3">
         <option value="">Filter by Quality</option>
+      </select>
+      <select id="yearFilter" class="p-2 border rounded w-1/3">
+        <option value="">Filter by Year</option>
       </select>
       <button id="toggleFavoritesBtn" class="ml-auto bg-yellow-400 text-black px-4 py-2 rounded">Favorites</button>
     </div>
@@ -62,19 +66,20 @@
     let favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
     let showingFavorites = false;
     let filteredPlaylist = [];
-    let rowHeight = 32; // approx height of each item in px
+    let rowHeight = 32;
     let visibleCount = 100;
 
     document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
     document.getElementById('languageFilter').addEventListener('change', applyFilters);
     document.getElementById('qualityFilter').addEventListener('change', applyFilters);
+    document.getElementById('yearFilter').addEventListener('change', applyFilters);
     document.getElementById('toggleFavoritesBtn').addEventListener('click', () => {
       showingFavorites = !showingFavorites;
       document.getElementById('toggleFavoritesBtn').textContent = showingFavorites ? 'Back to Playlist' : 'Favorites';
       applyFilters();
     });
     document.getElementById('playlistScroll').addEventListener('scroll', () => {
-      renderVisibleRows();
+      requestAnimationFrame(renderVisibleRows);
     });
 
     function fetchM3U() {
@@ -99,9 +104,11 @@
         if (line.startsWith('#EXTINF')) {
           const nameMatch = line.match(/,(.*)/);
           const groupMatch = line.match(/group-title="(.*?)"/i);
+          const yearMatch = line.match(/year="(\d{4})"/i);
           current = {
             name: nameMatch ? nameMatch[1] : 'Unknown',
-            group: groupMatch ? groupMatch[1] : 'Other'
+            group: groupMatch ? groupMatch[1] : 'Other',
+            year: yearMatch ? yearMatch[1] : ''
           };
         } else if (line && !line.startsWith('#')) {
           current.url = line;
@@ -116,8 +123,10 @@
     function populateFilters(channels) {
       const languageSelect = document.getElementById('languageFilter');
       const qualitySelect = document.getElementById('qualityFilter');
+      const yearSelect = document.getElementById('yearFilter');
       const languages = new Set();
       const qualities = new Set();
+      const years = new Set();
 
       channels.forEach(ch => {
         const name = ch.name;
@@ -130,16 +139,20 @@
         else if (/HD|720p/i.test(name)) qualities.add('HD');
         else if (/SD|480p/i.test(name)) qualities.add('SD');
         else qualities.add('Unknown');
+
+        if (ch.year) years.add(ch.year);
       });
 
       languageSelect.innerHTML = '<option value="">Filter by Language</option>' + Array.from(languages).sort().map(l => `<option value="${l}">${l}</option>`).join('');
       qualitySelect.innerHTML = '<option value="">Filter by Quality</option>' + Array.from(qualities).sort().map(q => `<option value="${q}">${q}</option>`).join('');
+      yearSelect.innerHTML = '<option value="">Filter by Year</option>' + Array.from(years).sort().map(y => `<option value="${y}">${y}</option>`).join('');
     }
 
     function applyFilters() {
       const search = document.getElementById('searchInput').value.toLowerCase();
       const lang = document.getElementById('languageFilter').value;
       const quality = document.getElementById('qualityFilter').value;
+      const year = document.getElementById('yearFilter').value;
 
       filteredPlaylist = currentPlaylist.filter(ch => {
         const matchesSearch = ch.name.toLowerCase().includes(search);
@@ -151,7 +164,8 @@
           (quality === 'SD' && /SD|480p/i.test(ch.name)) ||
           (quality === 'Unknown' && !/(UHD|4K|FHD|1080p|HD|720p|SD|480p)/i.test(ch.name))
         );
-        return matchesSearch && matchesLang && matchesQuality;
+        const matchesYear = !year || ch.year === year;
+        return matchesSearch && matchesLang && matchesQuality && matchesYear;
       });
 
       if (showingFavorites) {
@@ -163,7 +177,7 @@
 
     function renderVisibleRows() {
       const scrollTop = document.getElementById('playlistScroll').scrollTop;
-      const start = Math.floor(scrollTop / rowHeight);
+      const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 5);
       const end = start + visibleCount + 10;
 
       const display = document.getElementById('playlistDisplay');
@@ -218,7 +232,7 @@
 
       let content = "#EXTM3U\n";
       currentPlaylist.forEach(ch => {
-        content += `#EXTINF:-1 group-title="${ch.group}",${ch.name}\n${ch.url}\n`;
+        content += `#EXTINF:-1 group-title="${ch.group}"${ch.year ? ` year="${ch.year}"` : ''},${ch.name}\n${ch.url}\n`;
       });
 
       const blob = new Blob([content], { type: 'audio/x-mpegurl' });
