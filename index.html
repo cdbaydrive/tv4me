@@ -301,27 +301,30 @@
     }
 
     function playChannel(url) {
-      const overlay = document.getElementById('playerOverlay');
-      const container = document.getElementById('playerContainer');
-      container.innerHTML = '';
+      const isDirectStream = /\.(m3u8|mp4|webm)$/i.test(url) && url.startsWith('https://');
 
-      if (/\.(m3u8|mp4|webm)$/i.test(url)) {
+      if (isDirectStream && location.protocol === 'https:') {
+        const overlay = document.getElementById('playerOverlay');
+        const container = document.getElementById('playerContainer');
+        container.innerHTML = '';
+
         const video = document.createElement('video');
         video.src = url;
         video.controls = true;
         video.autoplay = true;
         video.className = 'w-full h-full';
         video.setAttribute('playsinline', 'true');
-        container.appendChild(video);
-      } else {
-        const iframe = document.createElement('iframe');
-        iframe.src = url;
-        iframe.className = 'w-full h-full';
-        iframe.allowFullscreen = true;
-        container.appendChild(iframe);
-      }
 
-      overlay.classList.remove('hidden');
+        video.addEventListener('loadedmetadata', () => {
+          video.play().catch(() => {});
+        });
+
+        container.appendChild(video);
+        overlay.classList.remove('hidden');
+      } else {
+        // Fallback to system player in new tab
+        window.open(url, '_blank');
+      }
     }
 
     function closePlayer() {
