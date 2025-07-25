@@ -19,7 +19,7 @@
 <body class="bg-gray-100 min-h-screen p-4">
   <div class="w-full bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-2 text-center">IPTV Playlist Viewer</h1>
-    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.4</p>
+    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.4 Grok3</p>
 
     <!-- M3U Fetch Form -->
     <div class="flex flex-wrap gap-2 mb-4">
@@ -230,11 +230,23 @@
           <span class="truncate">${ch.name}</span>
           <div class="flex items-center gap-2">
             <span class="star" onclick="toggleFavorite('${ch.url}')">${isFavorite ? '★' : '☆'}</span>
-            <a href="vlc://${ch.url.replace(/^http(s?):\/\//, 'http$1://')}" class="text-blue-600 text-xs">Play</a>
+            <button onclick="playStream('${ch.url}', '${ch.name}')" class="text-blue-600 text-xs">Play</button>
           </div>
         `;
         display.appendChild(div);
       }
+    }
+
+    function playStream(url, name) {
+      // Create a single-stream M3U file
+      const content = `#EXTM3U\n#EXTINF:-1,${name}\n${url}\n`;
+      const blob = new Blob([content], { type: 'audio/x-mpegurl' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${name.replace(/[^a-zA-Z0-9]/g, '_')}.m3u`; // Sanitize filename
+      a.click();
+      URL.revokeObjectURL(downloadUrl);
     }
 
     function toggleFavorite(url) {
