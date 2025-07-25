@@ -19,7 +19,7 @@
 <body class="bg-gray-100 min-h-screen p-4">
   <div class="w-full bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-2 text-center">IPTV Playlist Viewer</h1>
-    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.1</p>
+    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.2</p>
 
     <!-- M3U Fetch Form -->
     <div class="flex flex-wrap gap-2 mb-4">
@@ -55,9 +55,9 @@
         </select>
         <select id="typeFilter" class="p-2 border rounded w-1/4">
           <option value="">Filter by Type</option>
-          <option value="movie">Movies</option>
+          <option value="movie">Movie</option>
           <option value="series">Series</option>
-          <option value="channel">Channels</option>
+          <option value="channel">TV Channel</option>
         </select>
       </div>
       <button id="toggleFavoritesBtn" class="ml-auto bg-yellow-400 text-black px-4 py-2 rounded">Favorites</button>
@@ -66,6 +66,17 @@
     <!-- Scrollable Playlist Container -->
     <div id="playlistScroll" class="bg-gray-50 border rounded p-2">
       <div id="playlistDisplay" class="space-y-2"></div>
+    </div>
+  </div>
+
+  <!-- Player Overlay -->
+  <div id="playerOverlay" class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 hidden">
+    <div class="relative w-full h-full max-w-screen-md max-h-screen">
+      <div class="absolute top-2 right-2 z-50 flex gap-2">
+        <button onclick="toggleFullscreen()" class="bg-white text-black px-3 py-1 rounded shadow">Fullscreen ⛶</button>
+        <button onclick="closePlayer()" class="bg-white text-black px-3 py-1 rounded shadow">Close ✕</button>
+      </div>
+      <div class="w-full h-full" id="playerContainer"></div>
     </div>
   </div>
 
@@ -114,32 +125,29 @@
           const nameMatch = line.match(/,(.*)/);
           const groupMatch = line.match(/group-title="(.*?)"/i);
           const yearMatch = line.match(/year="(\d{4})"/i) || line.match(/(?:^|\D)((?:19|20)\d{2})(?:\D|$)/);
+          const name = nameMatch ? nameMatch[1] : 'Unknown';
+          const type = inferType(name);
+
           current = {
-            name: nameMatch ? nameMatch[1] : 'Unknown',
+            name,
             group: groupMatch ? groupMatch[1] : 'Other',
-            year: yearMatch ? yearMatch[1] : ''
+            year: yearMatch ? yearMatch[1] : '',
+            type
           };
         } else if (line && !line.startsWith('#')) {
           current.url = line;
-
-          const group = current.group.toLowerCase();
-          const name = current.name.toLowerCase();
-          const url = current.url.toLowerCase();
-
-          if (/movie|film|vod/.test(group) || /\.(mp4|avi|mkv|mov)$/.test(url) || /\b(movie|film)\b/.test(name)) {
-            current.type = 'movie';
-          } else if (/series|tv shows|saison/.test(group) || /s\d{1,2}e\d{1,2}/i.test(name) || /\bseason\b/.test(name)) {
-            current.type = 'series';
-          } else {
-            current.type = 'channel';
-          }
-
           channels.push({ ...current });
         }
       }
       currentPlaylist = channels;
       populateFilters(channels);
       applyFilters();
+    }
+
+    function inferType(name) {
+      if (/S\d{2}\s?E\d{2}/i.test(name)) return 'series';
+      if (/(19|20)\d{2}/.test(name)) return 'movie';
+      return 'channel';
     }
 
     function populateFilters(channels) {
@@ -162,7 +170,7 @@
         else qualities.add('Unknown');
       });
 
-      const sortedLanguages = Array.from(languages).sort((a, b) => {
+      const sortedLangs = Array.from(languages).sort((a, b) => {
         if (a === 'FR') return -1;
         if (b === 'FR') return 1;
         if (a === 'EN') return -1;
@@ -170,7 +178,7 @@
         return a.localeCompare(b);
       });
 
-      languageSelect.innerHTML = '<option value="">Filter by Language</option>' + sortedLanguages.map(l => `<option value="${l}">${l}</option>`).join('');
+      languageSelect.innerHTML = '<option value="">Filter by Language</option>' + sortedLangs.map(l => `<option value="${l}">${l}</option>`).join('');
       qualitySelect.innerHTML = '<option value="">Filter by Quality</option>' + Array.from(qualities).sort().map(q => `<option value="${q}">${q}</option>`).join('');
     }
 
@@ -203,6 +211,7 @@
         );
         const matchesYear = !year || ch.year === year;
         const matchesType = !type || ch.type === type;
+
         return matchesSearch && matchesLang && matchesQuality && matchesYear && matchesType;
       });
 
@@ -232,7 +241,7 @@
           <span class="truncate">${ch.name}</span>
           <div class="flex items-center gap-2">
             <span class="star" onclick="toggleFavorite('${ch.url}')">${isFavorite ? '★' : '☆'}</span>
-            <a href="${ch.url}" target="_blank" class="text-blue-600 text-xs">Play</a>
+            <button onclick="playChannel('${ch.url}')" class="text-blue-600 text-xs underline">Play</button>
           </div>
         `;
         display.appendChild(div);
@@ -289,6 +298,44 @@
         clearTimeout(timer);
         timer = setTimeout(() => fn.apply(this, args), delay);
       };
+    }
+
+    function playChannel(url) {
+      const overlay = document.getElementById('playerOverlay');
+      const container = document.getElementById('playerContainer');
+      container.innerHTML = '';
+
+      if (/\.(m3u8|mp4|webm)$/i.test(url)) {
+        const video = document.createElement('video');
+        video.src = url;
+        video.controls = true;
+        video.autoplay = true;
+        video.className = 'w-full h-full';
+        video.setAttribute('playsinline', 'true');
+        container.appendChild(video);
+      } else {
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.className = 'w-full h-full';
+        iframe.allowFullscreen = true;
+        container.appendChild(iframe);
+      }
+
+      overlay.classList.remove('hidden');
+    }
+
+    function closePlayer() {
+      document.getElementById('playerOverlay').classList.add('hidden');
+      document.getElementById('playerContainer').innerHTML = '';
+    }
+
+    function toggleFullscreen() {
+      const container = document.getElementById('playerContainer').firstElementChild;
+      if (!container) return;
+
+      if (container.requestFullscreen) container.requestFullscreen();
+      else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
+      else if (container.msRequestFullscreen) container.msRequestFullscreen();
     }
   </script>
 </body>
