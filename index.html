@@ -19,7 +19,7 @@
 <body class="bg-gray-100 min-h-screen p-4">
   <div class="w-full bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-2 text-center">IPTV Playlist Viewer</h1>
-    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.2</p>
+    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.4</p>
 
     <!-- M3U Fetch Form -->
     <div class="flex flex-wrap gap-2 mb-4">
@@ -66,17 +66,6 @@
     <!-- Scrollable Playlist Container -->
     <div id="playlistScroll" class="bg-gray-50 border rounded p-2">
       <div id="playlistDisplay" class="space-y-2"></div>
-    </div>
-  </div>
-
-  <!-- Player Overlay -->
-  <div id="playerOverlay" class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 hidden">
-    <div class="relative w-full h-full max-w-screen-md max-h-screen">
-      <div class="absolute top-2 right-2 z-50 flex gap-2">
-        <button onclick="toggleFullscreen()" class="bg-white text-black px-3 py-1 rounded shadow">Fullscreen ⛶</button>
-        <button onclick="closePlayer()" class="bg-white text-black px-3 py-1 rounded shadow">Close ✕</button>
-      </div>
-      <div class="w-full h-full" id="playerContainer"></div>
     </div>
   </div>
 
@@ -241,7 +230,7 @@
           <span class="truncate">${ch.name}</span>
           <div class="flex items-center gap-2">
             <span class="star" onclick="toggleFavorite('${ch.url}')">${isFavorite ? '★' : '☆'}</span>
-            <button onclick="playChannel('${ch.url}')" class="text-blue-600 text-xs underline">Play</button>
+            <a href="vlc://${ch.url.replace(/^http(s?):\/\//, 'http$1://')}" class="text-blue-600 text-xs">Play</a>
           </div>
         `;
         display.appendChild(div);
@@ -298,47 +287,6 @@
         clearTimeout(timer);
         timer = setTimeout(() => fn.apply(this, args), delay);
       };
-    }
-
-    function playChannel(url) {
-      const isDirectStream = /\.(m3u8|mp4|webm)$/i.test(url) && url.startsWith('https://');
-
-      if (isDirectStream && location.protocol === 'https:') {
-        const overlay = document.getElementById('playerOverlay');
-        const container = document.getElementById('playerContainer');
-        container.innerHTML = '';
-
-        const video = document.createElement('video');
-        video.src = url;
-        video.controls = true;
-        video.autoplay = true;
-        video.className = 'w-full h-full';
-        video.setAttribute('playsinline', 'true');
-
-        video.addEventListener('loadedmetadata', () => {
-          video.play().catch(() => {});
-        });
-
-        container.appendChild(video);
-        overlay.classList.remove('hidden');
-      } else {
-        // Fallback to system player in new tab
-        window.open(url, '_blank');
-      }
-    }
-
-    function closePlayer() {
-      document.getElementById('playerOverlay').classList.add('hidden');
-      document.getElementById('playerContainer').innerHTML = '';
-    }
-
-    function toggleFullscreen() {
-      const container = document.getElementById('playerContainer').firstElementChild;
-      if (!container) return;
-
-      if (container.requestFullscreen) container.requestFullscreen();
-      else if (container.webkitRequestFullscreen) container.webkitRequestFullscreen();
-      else if (container.msRequestFullscreen) container.msRequestFullscreen();
     }
   </script>
 </body>
