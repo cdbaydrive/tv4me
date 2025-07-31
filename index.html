@@ -10,7 +10,7 @@
       font-size: 1.2rem;
     }
     #playlistScroll {
-      height: calc(100vh - 320px);
+      height: calc(100vh - 340px);
       overflow-y: auto;
       scroll-behavior: smooth;
     }
@@ -19,13 +19,16 @@
 <body class="bg-gray-100 min-h-screen p-4">
   <div class="w-full bg-white rounded-2xl shadow-md p-6">
     <h1 class="text-2xl font-bold mb-2 text-center">IPTV Playlist Viewer</h1>
-    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.4 Grok4</p>
+    <p class="text-gray-500 text-xs text-center mb-4">Version 1.1.6</p>
 
     <!-- M3U Fetch Form -->
-    <div class="flex flex-wrap gap-2 mb-4">
+    <div class="flex flex-wrap gap-2 mb-2">
       <input type="text" id="m3uUrl" placeholder="Enter M3U URL" class="flex-grow border p-2 rounded">
       <button class="bg-green-600 text-white px-4 py-2 rounded" onclick="fetchM3U()">Fetch Playlist</button>
     </div>
+
+    <!-- Fetch Status -->
+    <p id="fetchStatus" class="text-sm text-gray-600 mb-4 h-5"></p>
 
     <!-- Buttons -->
     <div class="flex flex-wrap gap-2 items-center mb-4">
@@ -77,6 +80,46 @@
     let rowHeight = 32;
     let visibleCount = 100;
 
+    const urlInput = document.getElementById('m3uUrl');
+    const statusText = document.getElementById('fetchStatus');
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedUrl = localStorage.getItem('lastM3UUrl');
+      if (savedUrl) {
+        urlInput.value = savedUrl;
+      }
+    });
+
+    function setStatus(message, isError = false) {
+      statusText.textContent = message;
+      statusText.className = isError
+        ? 'text-sm text-red-600 mb-4 h-5'
+        : 'text-sm text-gray-600 mb-4 h-5';
+    }
+
+    function fetchM3U() {
+      const url = urlInput.value.trim();
+      if (!url) return alert('Please enter a URL.');
+
+      setStatus('Connecting to server...');
+      localStorage.setItem('lastM3UUrl', url);
+
+      fetch(url)
+        .then(res => {
+          if (!res.ok) throw new Error('Server returned an error.');
+          setStatus('Connected. Fetching playlist...');
+          return res.text();
+        })
+        .then(data => {
+          parseM3U(data);
+          setStatus('Playlist loaded successfully.');
+        })
+        .catch(err => {
+          console.error('Fetch error:', err);
+          setStatus('Failed to fetch playlist.', true);
+        });
+    }
+
     document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
     document.getElementById('languageFilter').addEventListener('change', applyFilters);
     document.getElementById('qualityFilter').addEventListener('change', applyFilters);
@@ -90,19 +133,6 @@
     document.getElementById('playlistScroll').addEventListener('scroll', () => {
       requestAnimationFrame(renderVisibleRows);
     });
-
-    function fetchM3U() {
-      const url = document.getElementById('m3uUrl').value.trim();
-      if (!url) return alert('Please enter a URL.');
-
-      fetch(url)
-        .then(res => res.text())
-        .then(data => parseM3U(data))
-        .catch(err => {
-          console.error('Fetch error:', err);
-          alert('Failed to fetch playlist.');
-        });
-    }
 
     function parseM3U(text) {
       const lines = text.split('\n');
@@ -231,6 +261,7 @@
           <div class="flex items-center gap-2">
             <span class="star" onclick="toggleFavorite('${ch.url}')">${isFavorite ? '★' : '☆'}</span>
             <button onclick="playStream('${ch.url}', '${ch.name}')" class="text-blue-600 text-xs">Play</button>
+            <button onclick="copyToClipboard('${ch.url}')" class="text-green-600 text-xs">Copy</button>
           </div>
         `;
         display.appendChild(div);
@@ -238,7 +269,6 @@
     }
 
     function playStream(url, name) {
-      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
       const content = `#EXTM3U\n#EXTINF:-1,${name}\n${url}\n`;
       const blob = new Blob([content], { type: 'audio/x-mpegurl' });
       const downloadUrl = URL.createObjectURL(blob);
@@ -247,9 +277,18 @@
       a.download = `${name.replace(/[^a-zA-Z0-9]/g, '_')}.m3u`;
       a.click();
       URL.revokeObjectURL(downloadUrl);
-      if (isIOS) {
-        alert('The .m3u file has been downloaded. Open the Files app, locate the file in Downloads, tap it, and choose "Share" to open with VLC. Ensure VLC is installed.');
-      }
+    }
+
+    function copyToClipboard(url) {
+      navigator.clipboard.writeText(url)
+        .then(() => {
+          setStatus('URL copied to clipboard.');
+          setTimeout(() => setStatus(''), 1500);
+        })
+        .catch(err => {
+          console.error('Clipboard copy failed:', err);
+          setStatus('Failed to copy URL.', true);
+        });
     }
 
     function toggleFavorite(url) {
